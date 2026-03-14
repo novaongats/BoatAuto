@@ -1,0 +1,9 @@
+requests
+beautifulsoup4
+openai
+playwright
+tweepy
+schedule
+pyautogui
+python-dotenv
+pytz
