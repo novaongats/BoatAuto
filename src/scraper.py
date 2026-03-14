@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import re
 from typing import Dict, List, Optional
 from datetime import datetime
+import pytz
 
 # 競艇場コード → 場名 マッピング
 VENUE_NAMES = {
@@ -23,12 +24,16 @@ class KyoteiScraper:
         })
         self.base_url = "https://www.boatrace.jp/owpc/pc/race"
 
+    def _get_jst_now(self) -> datetime:
+        """常に日本時間（JST）の現在日時を返す"""
+        return datetime.now(pytz.timezone('Asia/Tokyo'))
+
     def get_race_list(self, date_str: str = None) -> List[Dict]:
         """
         指定した日付（YYYYMMDD）の開催レース場一覧を取得。
         """
         if not date_str:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = self._get_jst_now().strftime("%Y%m%d")
 
         url = f"{self.base_url}/index?hd={date_str}"
         try:
@@ -62,7 +67,7 @@ class KyoteiScraper:
         """
         全開催場から、直近（デフォルト30分以内）に締切を迎えるレースのリストを取得する。
         """
-        date_str = datetime.now().strftime("%Y%m%d")
+        date_str = self._get_jst_now().strftime("%Y%m%d")
         url = f"{self.base_url}/index?hd={date_str}"
         
         try:
@@ -71,7 +76,7 @@ class KyoteiScraper:
             soup = BeautifulSoup(resp.text, "html.parser")
             
             upcoming = []
-            now = datetime.now()
+            now = self._get_jst_now()
             
             table_divs = soup.find_all("div", class_="table1")
             for div in table_divs:
@@ -152,7 +157,7 @@ class KyoteiScraper:
         Playwrightで完全にレンダリングされたHTMLから解析する。
         """
         if not date_str:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = self._get_jst_now().strftime("%Y%m%d")
 
         url = f"{self.base_url}/racelist?rno={race_no}&jcd={jcd}&hd={date_str}"
         try:
@@ -237,7 +242,7 @@ class KyoteiScraper:
         レース結果を取得
         """
         if not date_str:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = self._get_jst_now().strftime("%Y%m%d")
 
         url = f"{self.base_url}/raceresult?rno={race_no}&jcd={jcd}&hd={date_str}"
         try:
