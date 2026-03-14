@@ -242,38 +242,44 @@ class KyoteiScraper:
                 "payouts": {},
             }
 
-            # 着順テーブル
-            result_table = soup.find("div", class_="table1")
-            if result_table:
-                rows = result_table.find_all("tbody")
-                for tbody in rows:
-                    tds = tbody.find_all("td")
-                    if len(tds) >= 2:
-                        waku = tds[0].get_text(strip=True)
-                        result["order"].append(waku)
+            tables = soup.find_all("div", class_="table1")
+            
+            # 着順（通常2番目のtable1内）
+            if len(tables) > 1:
+                tbody = tables[1].find("tbody", class_="is-fs14")
+                if not tbody:
+                    tbody = tables[1].find("tbody")
+                
+                if tbody:
+                    for tr in tbody.find_all("tr"):
+                        tds = tr.find_all("td")
+                        if len(tds) >= 3:
+                            rank = tds[0].get_text(strip=True)
+                            waku = tds[1].get_text(strip=True)
+                            # １, ２, ３などの全角数字、または半角をチェック
+                            if rank in ["１", "２", "３", "４", "５", "６", "1", "2", "3", "4", "5", "6"] and waku.isdigit():
+                                result["order"].append(waku)
 
             # 払戻金テーブル
-            payout_table = soup.find("div", class_="table1", id=re.compile(r"payout"))
-            if not payout_table:
-                # 別の方法で払戻金テーブルを探す
-                all_tables = soup.find_all("div", class_="table1")
-                for t in all_tables:
-                    if "3連単" in t.get_text() or "払戻金" in t.get_text():
-                        payout_table = t
-                        break
-
-            if payout_table:
-                rows = payout_table.find_all("tr")
-                for row in rows:
-                    header = row.find("th")
-                    value = row.find("td")
-                    if header and value:
-                        bet_type = header.get_text(strip=True)
-                        payout_text = value.get_text(strip=True)
-                        # 数字のみ抽出
-                        payout_num = re.sub(r"[^\d]", "", payout_text)
-                        if payout_num:
-                            result["payouts"][bet_type] = int(payout_num)
+            for t in tables:
+                if "3連単" in t.get_text() or "払戻金" in t.get_text():
+                    for tbody in t.find_all("tbody"):
+                        for tr in tbody.find_all("tr"):
+                            tds = tr.find_all("td")
+                            
+                            # 左側の払戻
+                            if len(tds) >= 3:
+                                bet_type = tds[0].get_text(strip=True)
+                                payout_str = tds[2].get_text(strip=True).replace("¥", "").replace(",", "")
+                                if bet_type and payout_str.isdigit():
+                                    result["payouts"][bet_type] = int(payout_str)
+                                    
+                            # 右側の払戻（同着や別券種）
+                            if len(tds) >= 6:
+                                bet_type2 = tds[3].get_text(strip=True)
+                                payout_str2 = tds[5].get_text(strip=True).replace("¥", "").replace(",", "")
+                                if bet_type2 and payout_str2.isdigit():
+                                    result["payouts"][bet_type2] = int(payout_str2)
 
             return result
         except Exception as e:
