@@ -33,6 +33,8 @@ if "promo" not in st.session_state:
     st.session_state.promo = None
 if "hit_result" not in st.session_state:
     st.session_state.hit_result = None
+if "daily_hits" not in st.session_state:
+    st.session_state.daily_hits = []
 
 # ==========================================
 # ロード処理
@@ -279,7 +281,7 @@ if st.session_state.article:
                 
                 # 判定
                 bets = checker.parse_bets_from_article(st.session_state.edit_article)
-                hit = checker.check_hit(bets, result["order"][:3])
+                hit = checker.check_hit(bets, result) # result全体を渡すように変更
                 
                 st.session_state.hit_result = {
                     "hit": hit,
@@ -301,7 +303,12 @@ if st.session_state.hit_result:
             race_info = {"venue": p["venue"], "race_no": p["race_no"]}
             doya = checker.generate_doya_post(hit, race_info, persona_name=selected_persona)
             
-            st.subheader("🔥 生成されたドヤ投稿")
+            # 本日の的中リストに追加 (重複防止)
+            hit_record = f"{p['venue']}{p['race_no']}R🎯{hit.get('result_str', '').replace('-','')}🎯{hit.get('payout', 0):,}円"
+            if hit_record not in st.session_state.daily_hits:
+                st.session_state.daily_hits.append(hit_record)
+            
+            st.subheader("🔥 生成されたドヤ投稿 (コピペ用)")
             
             dk_col1, dk_col2 = st.columns(2)
             with dk_col1:
@@ -317,3 +324,14 @@ if st.session_state.hit_result:
                     st.success("コピーしました！")
     else:
         st.error(f"😢 残念... ハズレです (結果: {hit_data['order']})")
+
+if st.session_state.daily_hits:
+    st.divider()
+    st.header("🏆 本日の的中リスト")
+    
+    hits_text = "\n".join(st.session_state.daily_hits)
+    st.code(hits_text, language="text")
+    
+    if st.button("📋 中間報告用に全リストをコピー", key="copy_daily_hits"):
+        publisher.post_to_line_opchat(hits_text)
+        st.success("コピーしました！")
