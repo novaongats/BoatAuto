@@ -134,40 +134,22 @@ class KyoteiScraper:
             print(f"Error fetching upcoming races: {e}")
             return []
 
-    def _get_rendered_html(self, url: str, wait_selector: str = "table.is-w1000") -> str:
-        """
-        Playwrightを使ってJSレンダリング後のHTMLを取得する。
-        """
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            # テーブルが描画されるまで待機
-            try:
-                page.wait_for_selector(wait_selector, timeout=10000)
-            except:
-                pass  # テーブルがない場合もある（結果ページなど）
-            html = page.content()
-            browser.close()
-            return html
-
     def get_race_program(self, jcd: str, race_no: int, date_str: str = None) -> Dict:
         """
         指定したレース場・レース番号の出走表データを取得。
-        Playwrightで完全にレンダリングされたHTMLから解析する。
+        標準のrequests + BeautifulSoupで静的HTMLから解析する。
         """
         if not date_str:
             date_str = self._get_jst_now().strftime("%Y%m%d")
 
         url = f"{self.base_url}/racelist?rno={race_no}&jcd={jcd}&hd={date_str}"
         try:
-            html = self._get_rendered_html(url, wait_selector="table.is-w1000")
-            soup = BeautifulSoup(html, "html.parser")
+            resp = self.session.get(url, timeout=15)
+            resp.encoding = "utf-8"
+            soup = BeautifulSoup(resp.text, "html.parser")
 
             entries = []
             # 選手リンク（racersearch/profile）から名前を取得
-            # 各選手に2つのリンクがある（画像用+テキスト用）ので、テキスト入りのものだけフィルタ
             racer_links = soup.find_all("a", href=re.compile(r"racersearch/profile"))
             seen_tobans = []
             for link in racer_links:
