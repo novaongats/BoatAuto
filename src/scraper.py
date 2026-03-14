@@ -112,6 +112,7 @@ class KyoteiScraper:
                                 today_str = now.strftime("%Y-%m-%d")
                                 dt_str = f"{today_str} {time_str}"
                                 deadline_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+                                deadline_dt = pytz.timezone('Asia/Tokyo').localize(deadline_dt)
                                 diff_minutes = (deadline_dt - now).total_seconds() / 60.0
                                 
                                 if -5 <= diff_minutes <= max_minutes:
