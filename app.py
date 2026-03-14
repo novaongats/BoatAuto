@@ -4,8 +4,46 @@ BoatAuto Web UI (Streamlit)
 import os
 import sys
 import json
+from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
+
+PENDING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_bets.json")
+
+def load_pending() -> list:
+    if os.path.exists(PENDING_FILE):
+        try:
+            with open(PENDING_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_pending(bets: list):
+    with open(PENDING_FILE, "w", encoding="utf-8") as f:
+        json.dump(bets, f, ensure_ascii=False, indent=2)
+
+def add_pending(program: dict, article: str):
+    bets = load_pending()
+    key = f"{program['jcd']}_{program['race_no']}_{program.get('date', '')}"
+    # 重複防止
+    bets = [b for b in bets if b.get("key") != key]
+    bets.append({
+        "key": key,
+        "venue": program["venue"],
+        "race_no": program["race_no"],
+        "jcd": program["jcd"],
+        "date": program.get("date", ""),
+        "deadline": program.get("deadline", ""),
+        "article": article,
+        "saved_at": datetime.now().strftime("%H:%M"),
+    })
+    save_pending(bets)
+
+def delete_pending(key: str):
+    bets = load_pending()
+    bets = [b for b in bets if b.get("key") != key]
+    save_pending(bets)
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -35,6 +73,12 @@ if "hit_result" not in st.session_state:
     st.session_state.hit_result = None
 if "daily_hits" not in st.session_state:
     st.session_state.daily_hits = []
+if "pending_check_key" not in st.session_state:
+    st.session_state.pending_check_key = None
+if "pending_article" not in st.session_state:
+    st.session_state.pending_article = None
+if "pending_program" not in st.session_state:
+    st.session_state.pending_program = None
 
 # ==========================================
 # ロード処理
@@ -239,15 +283,21 @@ if st.session_state.article:
         st.subheader("note用 予想記事")
         st.text_area("内容を確認・編集できます:", value=st.session_state.article, height=400, key="edit_article")
         
-        # 保存ボタン
-        if st.button("💾 記事をファイルに保存", use_container_width=True):
-            output_dir = os.path.join(os.path.dirname(__file__), "output")
-            os.makedirs(output_dir, exist_ok=True)
-            p = st.session_state.program
-            file_path = os.path.join(output_dir, f"{p['venue']}{p['race_no']}R_article.txt")
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(st.session_state.edit_article)
-            st.success(f"保存しました: {file_path}")
+        save_col1, save_col2 = st.columns(2)
+        with save_col1:
+            if st.button("💾 記事をファイルに保存", use_container_width=True):
+                output_dir = os.path.join(os.path.dirname(__file__), "output")
+                os.makedirs(output_dir, exist_ok=True)
+                p = st.session_state.program
+                file_path = os.path.join(output_dir, f"{p['venue']}{p['race_no']}R_article.txt")
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(st.session_state.edit_article)
+                st.success(f"保存しました: {file_path}")
+        with save_col2:
+            if st.button("🔒 予想を保留する（後で結果確認）", use_container_width=True, type="primary"):
+                add_pending(st.session_state.program, st.session_state.edit_article)
+                p = st.session_state.program
+                st.success(f"✅ {p['venue']}{p['race_no']}R を保留リストに追加しました！ブラウザを閉じても大丈夫です。")
             
     with col2:
         st.subheader("SNS用 告知文")
@@ -263,30 +313,75 @@ if st.session_state.article:
         x_text = st.session_state.promo.get("x_post", "")
         st.info(x_text)
 
-# 3. 結果確認・ドヤ投稿エリア
+# 3. 保留中の予想リスト
+st.divider()
+st.header("📌 保留中の予想")
+pending_bets = load_pending()
+if not pending_bets:
+    st.info("保留中の予想はありません。")
+else:
+    for bet in pending_bets:
+        vkey = bet["key"]
+        label = f"**{bet['venue']}{bet['race_no']}R** (締切: {bet.get('deadline','??')}) ─ {bet.get('saved_at','')}保存"
+        with st.expander(label, expanded=False):
+            st.code(bet["article"][:300] + "…", language="text")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("🏁 結果確認する", key=f"check_{vkey}", type="primary"):
+                    st.session_state.pending_check_key = vkey
+                    st.session_state.pending_article = bet["article"]
+                    st.session_state.pending_program = bet
+                    st.session_state.hit_result = None
+            with col_b:
+                if st.button("🗑️ 削除", key=f"del_{vkey}"):
+                    delete_pending(vkey)
+                    st.rerun()
+
+# --- 保留レースの結果確認処理 ---
+if st.session_state.pending_check_key:
+    pb = st.session_state.pending_program
+    st.subheader(f"🏁 {pb['venue']}{pb['race_no']}R 結果確認中...")
+    with st.spinner("結果を取得中..."):
+        result = scraper.get_race_result(jcd=pb["jcd"], race_no=pb["race_no"], date_str=pb.get("date"))
+        if result and result.get("order"):
+            order_str = "-".join(result["order"][:3])
+            st.write(f"**確定着順:** {order_str}")
+            bets = checker.parse_bets_from_article(st.session_state.pending_article)
+            hit = checker.check_hit(bets, result)
+            st.session_state.hit_result = {
+                "hit": hit,
+                "order": order_str,
+                "result_data": result,
+                "program": pb,
+                "from_pending": True,
+            }
+            # 確認済みのため保留から削除
+            delete_pending(st.session_state.pending_check_key)
+            st.session_state.pending_check_key = None
+        else:
+            st.warning("まだ結果が出ていないようです。少し待ってから再度お試しください。")
+            st.session_state.pending_check_key = None
+
+# 4. 結果確認・ドヤ投稿エリア（現在セッション or 保留確認分）
 st.divider()
 st.header("🎯 結果確認＆ドヤ投稿")
 
-if st.session_state.article:
+if st.session_state.article and not st.session_state.hit_result:
     st.write("レース終了後、以下のボタンを押して結果を取得し、的中判定を行います。")
     if st.button("🏁 レース結果を取得して的中判定", type="primary"):
         with st.spinner("結果を取得中..."):
             p = st.session_state.program
             result = scraper.get_race_result(jcd=p["jcd"], race_no=p["race_no"])
-            
             if result and result.get("order"):
-                # 着順表示
                 order_str = "-".join(result["order"][:3])
                 st.write(f"**確定着順:** {order_str}")
-                
-                # 判定
                 bets = checker.parse_bets_from_article(st.session_state.edit_article)
-                hit = checker.check_hit(bets, result) # result全体を渡すように変更
-                
+                hit = checker.check_hit(bets, result)
                 st.session_state.hit_result = {
                     "hit": hit,
                     "order": order_str,
-                    "result_data": result
+                    "result_data": result,
+                    "program": st.session_state.program,
                 }
             else:
                 st.warning("レース結果の取得に失敗しました。まだレースが終わっていない可能性があります。")
