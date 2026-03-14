@@ -69,70 +69,75 @@ class KyoteiScraper:
         """
         date_str = self._get_jst_now().strftime("%Y%m%d")
         url = f"{self.base_url}/index?hd={date_str}"
-        
+
         try:
             resp = self.session.get(url, timeout=15)
             resp.encoding = "utf-8"
             soup = BeautifulSoup(resp.text, "html.parser")
-            
+
             upcoming = []
             now = self._get_jst_now()
-            
+
             table_divs = soup.find_all("div", class_="table1")
             for div in table_divs:
                 rows = div.find_all("tbody")
                 for row in rows:
+                    # 会場コード（jcd）の取得
                     jcd = "00"
                     venue_name = "不明"
-                    
                     venue_link = row.find("a", href=re.compile(r"jcd=\d+"))
                     if venue_link:
-                        venue_href = venue_link.get("href", "")
-                        jcd_match = re.search(r"jcd=(\d+)", venue_href)
-                        if jcd_match: jcd = jcd_match.group(1)
+                        href = venue_link.get("href", "")
+                        jcd_match = re.search(r"jcd=(\d+)", href)
+                        if jcd_match:
+                            jcd = jcd_match.group(1)
                         venue_name = venue_link.get_text(strip=True)
-                        
-                    img = row.find("img", alt=True)
-                    if img and venue_name == "不明":
-                        venue_name = img.get("alt")
-                        
-                    if jcd == "00": continue
 
-                    tds = row.find_all("td", class_="is-p10-0")
-                    if not tds:
-                        tds = row.find_all("td")
+                    if jcd == "00":
+                        continue
 
-                    race_no = 1
+                    tds = row.find_all("td")
+                    race_no = None
+                    deadline_time = None
+
                     for td in tds:
-                        time_text = td.get_text(strip=True)
-                        m = re.search(r'(\d{1,2}:\d{2})', time_text)
-                        if m:
-                            time_str = m.group(1)
-                            try:
-                                today_str = now.strftime("%Y-%m-%d")
-                                dt_str = f"{today_str} {time_str}"
-                                deadline_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-                                deadline_dt = pytz.timezone('Asia/Tokyo').localize(deadline_dt)
-                                diff_minutes = (deadline_dt - now).total_seconds() / 60.0
-                                
-                                if -5 <= diff_minutes <= max_minutes:
-                                    upcoming.append({
-                                        "jcd": jcd,
-                                        "venue": venue_name,
-                                        "race_no": race_no,
-                                        "deadline": time_str,
-                                        "minutes_left": int(diff_minutes)
-                                    })
-                            except:
-                                pass
-                            race_no += 1
+                        text = td.get_text(strip=True)
+                        # "3R" のようなセルからレース番号を取得
+                        r_match = re.match(r'^(\d+)R$', text)
+                        if r_match:
+                            race_no = int(r_match.group(1))
+                        # "11:55" のような時刻セルから締切時刻を取得
+                        t_match = re.search(r'(\d{1,2}:\d{2})', text)
+                        if t_match and race_no is not None and deadline_time is None:
+                            deadline_time = t_match.group(1)
+
+                    if race_no is None or deadline_time is None:
+                        continue
+
+                    try:
+                        today_str = now.strftime("%Y-%m-%d")
+                        deadline_dt = datetime.strptime(f"{today_str} {deadline_time}", "%Y-%m-%d %H:%M")
+                        deadline_dt = pytz.timezone("Asia/Tokyo").localize(deadline_dt)
+                        diff_minutes = (deadline_dt - now).total_seconds() / 60.0
+
+                        if -5 <= diff_minutes <= max_minutes:
+                            upcoming.append({
+                                "jcd": jcd,
+                                "venue": venue_name,
+                                "race_no": race_no,
+                                "deadline": deadline_time,
+                                "minutes_left": int(diff_minutes),
+                            })
+                    except Exception:
+                        pass
 
             upcoming.sort(key=lambda x: x["minutes_left"])
             return upcoming
-            
+
         except Exception as e:
             print(f"Error fetching upcoming races: {e}")
             return []
+
 
     def get_race_program(self, jcd: str, race_no: int, date_str: str = None) -> Dict:
         """
