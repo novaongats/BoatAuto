@@ -292,7 +292,10 @@ if st.session_state.article:
                 file_path = os.path.join(output_dir, f"{p['venue']}{p['race_no']}R_article.txt")
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(st.session_state.edit_article)
-                st.success(f"保存しました: {file_path}")
+                # ファイル保存と同時に保留リストにも自動追加
+                add_pending(st.session_state.program, st.session_state.edit_article)
+                st.success(f"✅ 保存しました！保留リストにも追加済みです。ブラウザを閉じても後で結果確認できます。")
+
         with save_col2:
             if st.button("🔒 予想を保留する（後で結果確認）", use_container_width=True, type="primary"):
                 add_pending(st.session_state.program, st.session_state.edit_article)
