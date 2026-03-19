@@ -91,7 +91,8 @@ class KyoteiScraper:
                         jcd_match = re.search(r"jcd=(\d+)", href)
                         if jcd_match:
                             jcd = jcd_match.group(1)
-                        venue_name = venue_link.get_text(strip=True)
+                    # リンクテキストは大会名が入るので、VENUE_NAMESから正式な会場名を取得
+                    venue_name = VENUE_NAMES.get(jcd, f"場{jcd}")
 
                     if jcd == "00":
                         continue
