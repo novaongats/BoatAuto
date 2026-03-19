@@ -304,7 +304,7 @@ class KyoteiScraper:
 
     def get_race_result(self, jcd: str, race_no: int, date_str: str = None) -> Dict:
         """
-        レース結果を取得
+        レース結果を取得。全 div.table1 から着順テーブルを自動検索する。
         """
         if not date_str:
             date_str = self._get_jst_now().strftime("%Y%m%d")
@@ -325,48 +325,49 @@ class KyoteiScraper:
             }
 
             tables = soup.find_all("div", class_="table1")
-            
-            # 着順（通常2番目のtable1内）
-            if len(tables) > 1:
-                tbody = tables[1].find("tbody", class_="is-fs14")
-                if not tbody:
-                    tbody = tables[1].find("tbody")
-                
-                if tbody:
+            rank_valid = {"１", "２", "３", "４", "５", "６", "1", "2", "3", "4", "5", "6"}
+
+            # --- 着順の取得: 全 div.table1 から「着」と「枠」を含むものを探す ---
+            for t in tables:
+                t_text = t.get_text()
+                if "着" not in t_text or "枠" not in t_text:
+                    continue
+                for tbody in t.find_all("tbody"):
+                    for tr in tbody.find_all("tr"):
+                        tds = tr.find_all("td")
+                        if len(tds) < 2:
+                            continue
+                        rank = tds[0].get_text(strip=True)
+                        waku = tds[1].get_text(strip=True)
+                        if rank in rank_valid and waku.isdigit():
+                            result["order"].append(waku)
+                if result["order"]:
+                    break
+
+            # --- 払戻金の取得: 全 div.table1 から 3連単 または 払戻 を含むものを探す ---
+            for t in tables:
+                t_text = t.get_text()
+                if "3連単" not in t_text and "払戻" not in t_text:
+                    continue
+                for tbody in t.find_all("tbody"):
                     for tr in tbody.find_all("tr"):
                         tds = tr.find_all("td")
                         if len(tds) >= 3:
-                            rank = tds[0].get_text(strip=True)
-                            waku = tds[1].get_text(strip=True)
-                            # １, ２, ３などの全角数字、または半角をチェック
-                            if rank in ["１", "２", "３", "４", "５", "６", "1", "2", "3", "4", "5", "6"] and waku.isdigit():
-                                result["order"].append(waku)
-
-            # 払戻金テーブル
-            for t in tables:
-                if "3連単" in t.get_text() or "払戻金" in t.get_text():
-                    for tbody in t.find_all("tbody"):
-                        for tr in tbody.find_all("tr"):
-                            tds = tr.find_all("td")
-                            
-                            # 左側の払戻
-                            if len(tds) >= 3:
-                                bet_type = tds[0].get_text(strip=True)
-                                payout_str = tds[2].get_text(strip=True).replace("¥", "").replace(",", "")
-                                if bet_type and payout_str.isdigit():
-                                    result["payouts"][bet_type] = int(payout_str)
-                                    
-                            # 右側の払戻（同着や別券種）
-                            if len(tds) >= 6:
-                                bet_type2 = tds[3].get_text(strip=True)
-                                payout_str2 = tds[5].get_text(strip=True).replace("¥", "").replace(",", "")
-                                if bet_type2 and payout_str2.isdigit():
-                                    result["payouts"][bet_type2] = int(payout_str2)
+                            bet_type = tds[0].get_text(strip=True)
+                            payout_str = tds[2].get_text(strip=True).replace("¥", "").replace(",", "").replace("円", "")
+                            if bet_type and re.match(r"^\d+$", payout_str):
+                                result["payouts"][bet_type] = int(payout_str)
+                        if len(tds) >= 6:
+                            bet_type2 = tds[3].get_text(strip=True)
+                            payout_str2 = tds[5].get_text(strip=True).replace("¥", "").replace(",", "").replace("円", "")
+                            if bet_type2 and re.match(r"^\d+$", payout_str2):
+                                result["payouts"][bet_type2] = int(payout_str2)
 
             return result
         except Exception as e:
             print(f"Error fetching race result: {e}")
             return {}
+
 
 
 if __name__ == "__main__":
