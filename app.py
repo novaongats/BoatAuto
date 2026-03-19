@@ -402,25 +402,29 @@ if st.session_state.hit_result:
             race_info = {"venue": p["venue"], "race_no": p["race_no"]}
             doya = checker.generate_doya_post(hit, race_info, persona_name=selected_persona)
             
+            # ユーザー指定の厳密フォーマット
+            simple_doya = f"{p['venue']}{p['race_no']}R🎯{hit.get('result_str', '').replace('-','')}🎯{hit.get('payout', 0):,}円㊗️"
+            
             # 本日の的中リストに追加 (重複防止)
-            hit_record = f"{p['venue']}{p['race_no']}R🎯{hit.get('result_str', '').replace('-','')}🎯{hit.get('payout', 0):,}円"
-            if hit_record not in st.session_state.daily_hits:
-                st.session_state.daily_hits.append(hit_record)
+            if simple_doya not in st.session_state.daily_hits:
+                st.session_state.daily_hits.append(simple_doya)
             
-            st.subheader("🔥 生成されたドヤ投稿 (コピペ用)")
+            st.subheader("🔥 的中ドヤ報告 (コピペ用)")
+            st.code(simple_doya, language="text")
             
-            dk_col1, dk_col2 = st.columns(2)
-            with dk_col1:
-                st.markdown("**note用 / X用**")
-                st.info(doya.get("note", ""))
-                st.info(doya.get("x", ""))
-            with dk_col2:
-                st.markdown("**LINE用**")
-                line_doya = doya.get("line", "")
-                st.info(line_doya)
-                if st.button("📋 ドヤ報告をLINEにコピー", key="copy_doya"):
-                    publisher.post_to_line_opchat(line_doya)
-                    st.success("コピーしました！")
+            with st.expander("📝 SNS用 長文ドヤテキスト (AI生成)"):
+                dk_col1, dk_col2 = st.columns(2)
+                with dk_col1:
+                    st.markdown("**note用 / X用**")
+                    st.info(doya.get("note", ""))
+                    st.info(doya.get("x", ""))
+                with dk_col2:
+                    st.markdown("**LINE用**")
+                    line_doya = doya.get("line", "")
+                    st.info(line_doya)
+                    if st.button("📋 ドヤ文字をコピー", key=f"copy_{p['venue']}_{p['race_no']}"):
+                        publisher.post_to_line_opchat(line_doya)
+                        st.success("コピーしました！")
     else:
         st.error(f"😢 残念... ハズレです (結果: {hit_data['order']})")
 

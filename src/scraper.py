@@ -159,13 +159,16 @@ class KyoteiScraper:
             schedule_divs = soup.find_all("div", class_="table1")
             if schedule_divs:
                 trs = schedule_divs[0].find_all("tr")
-                for tr in trs:
-                    ths = tr.find_all(["th", "td"])
-                    for j, th in enumerate(ths):
-                        if th.get_text(strip=True) == f"{race_no}R" and j + 1 < len(ths):
-                            t = re.search(r"(\d{1,2}:\d{2})", ths[j + 1].get_text())
-                            if t:
-                                deadline = t.group(1)
+                if len(trs) >= 2:
+                    header_tds = trs[0].find_all(["th", "td"])
+                    time_tds = trs[1].find_all(["th", "td"])
+                    for j, h in enumerate(header_tds):
+                        if h.get_text(strip=True) == f"{race_no}R":
+                            if j < len(time_tds):
+                                t_match = re.search(r"(\d{1,2}:\d{2})", time_tds[j].get_text())
+                                if t_match:
+                                    deadline = t_match.group(1)
+                            break
                 if not deadline:
                     all_times = re.findall(r"\d{1,2}:\d{2}", schedule_divs[0].get_text())
                     if all_times:
