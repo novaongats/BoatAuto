@@ -47,8 +47,9 @@ class AIGenerator:
             
         system_prompt = self.personas[persona_name].get("system_prompt", "")
         
-        # ユーザーに渡すレースデータ（出走表など）をフォーマット
-        race_info_text = json.dumps(race_data, ensure_ascii=False, indent=2)
+        # タイトル（〇〇杯などのレース名）は記事に不要なので除外してからAIに渡す
+        race_data_for_ai = {k: v for k, v in race_data.items() if k != "title"}
+        race_info_text = json.dumps(race_data_for_ai, ensure_ascii=False, indent=2)
         
         # オプションパラメータの展開
         deadline = options.get("deadline", "未定")

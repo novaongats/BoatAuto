@@ -152,7 +152,7 @@ with st.sidebar:
     
     venues = cached_get_venues()
     if venues:
-        venue_options = {f"{v['name']} ({v['title']})": v for v in venues}
+        venue_options = {v['name']: v for v in venues}
         # セッションステートの選択値を反映させるためのインデックス探し
         default_venue_idx = 0
         for idx, v in enumerate(venues):
@@ -256,7 +256,7 @@ st.title("🚤 BoatAuto Dashboard")
 if st.session_state.program:
     p = st.session_state.program
     st.header(f"📊 {p['venue']} {p['race_no']}R 出走表")
-    st.caption(f"レース名: {p['title']} | 締切予定: {p.get('deadline', '未定')}")
+    st.caption(f"締切予定: {p.get('deadline', '未定')}")
     
     # テーブル表示用のデータ整形
     table_data = []
