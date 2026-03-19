@@ -5,6 +5,7 @@ import os
 import sys
 import json
 from datetime import datetime
+import pytz
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -36,7 +37,7 @@ def add_pending(program: dict, article: str):
         "date": program.get("date", ""),
         "deadline": program.get("deadline", ""),
         "article": article,
-        "saved_at": datetime.now().strftime("%H:%M"),
+        "saved_at": datetime.now(pytz.timezone('Asia/Tokyo')).strftime("%H:%M"),
     })
     save_pending(bets)
 
