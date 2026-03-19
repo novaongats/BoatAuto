@@ -142,7 +142,7 @@ class KyoteiScraper:
     def get_race_program(self, jcd: str, race_no: int, date_str: str = None) -> Dict:
         """
         指定したレース場・レース番号の出走表データを取得。
-        標準のrequests + BeautifulSoupで静的HTMLから解析する。
+        選手・モーター・ボート統計も含む拡張版。
         """
         if not date_str:
             date_str = self._get_jst_now().strftime("%Y%m%d")
@@ -153,58 +153,139 @@ class KyoteiScraper:
             resp.encoding = "utf-8"
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            entries = []
-            # 選手リンク（racersearch/profile）から名前を取得
-            racer_links = soup.find_all("a", href=re.compile(r"racersearch/profile"))
-            seen_tobans = []
-            for link in racer_links:
-                name_text = link.get_text(strip=True)
-                if not name_text:
-                    continue  # テキストなしのリンク（画像リンク等）はスキップ
-                href = link.get("href", "")
-                toban_match = re.search(r"toban=(\d+)", href)
-                toban = toban_match.group(1) if toban_match else ""
-                if toban in seen_tobans:
-                    continue  # 重複スキップ
-                seen_tobans.append(toban)
-
-                entry = {
-                    "waku": len(seen_tobans),
-                    "name": re.sub(r"\s+", " ", name_text),
-                    "toban": toban,
-                }
-                entries.append(entry)
-
-            # 締切時刻の取得
+            # --- 締切時刻の取得 ---
             deadline = ""
-            schedule_tables = soup.find_all("table", class_="table1")
-            for st in schedule_tables:
-                trs = st.find_all("tr")
-                if len(trs) >= 2:
-                    headers = trs[0].find_all(["th", "td"])
-                    values = trs[1].find_all(["th", "td"])
-                    for j, h in enumerate(headers):
-                        h_text = h.get_text(strip=True)
-                        if h_text == f"{race_no}R" and j < len(values):
-                            time_text = values[j].get_text(strip=True)
-                            time_match = re.search(r"(\d{1,2}:\d{2})", time_text)
-                            if time_match:
-                                deadline = time_match.group(1)
-                                break
-                    if deadline:
-                        break
-            if not deadline:
-                time_matches = re.findall(r"(\d{1,2}:\d{2})", soup.get_text())
-                if time_matches:
-                    deadline = time_matches[0]
+            schedule_divs = soup.find_all("div", class_="table1")
+            if schedule_divs:
+                trs = schedule_divs[0].find_all("tr")
+                for tr in trs:
+                    ths = tr.find_all(["th", "td"])
+                    for j, th in enumerate(ths):
+                        if th.get_text(strip=True) == f"{race_no}R" and j + 1 < len(ths):
+                            t = re.search(r"(\d{1,2}:\d{2})", ths[j + 1].get_text())
+                            if t:
+                                deadline = t.group(1)
+                if not deadline:
+                    all_times = re.findall(r"\d{1,2}:\d{2}", schedule_divs[0].get_text())
+                    if all_times:
+                        deadline = all_times[0]
 
-            # レースタイトルの取得
+            # --- レースタイトルの取得 ---
             race_title = ""
-            title_tag = soup.find("div", class_="heading2_titleName")
-            if not title_tag:
-                title_tag = soup.find("h2", class_="heading2_titleName")
-            if title_tag:
-                race_title = title_tag.get_text(strip=True)
+            for cls in ["heading2_titleName", "heading1_title"]:
+                tag = soup.find(["div", "h2", "span"], class_=cls)
+                if tag:
+                    race_title = tag.get_text(strip=True)
+                    break
+
+            # --- 出走選手データの取得 ---
+            entries = []
+            entry_div = schedule_divs[1] if len(schedule_divs) > 1 else None
+            if not entry_div:
+                return {}
+
+            tbody_list = entry_div.find_all("tbody")
+
+            def _safe_float(s):
+                try:
+                    return float(s)
+                except (ValueError, TypeError):
+                    return None
+
+            def _safe_int(s):
+                try:
+                    return int(s)
+                except (ValueError, TypeError):
+                    return None
+
+            for waku_idx, tbody in enumerate(tbody_list, start=1):
+                # 選手名 + 登番: プロファイルリンクatagが2つある（1つは画像用で空, もう1つがテキスト）
+                name = ""
+                toban = ""
+                for a in tbody.find_all("a", href=re.compile(r"racersearch/profile")):
+                    t = a.get_text(strip=True)
+                    if t:  # テキストがあるほうが選手名
+                        name = re.sub(r"\s+", " ", t)
+                        m = re.search(r"toban=(\d+)", a.get("href", ""))
+                        if m:
+                            toban = m.group(1)
+                        break
+                # 名前が取れなかった場合はtobanだけでも取る
+                if not toban:
+                    first_a = tbody.find("a", href=re.compile(r"racersearch/profile"))
+                    if first_a:
+                        m = re.search(r"toban=(\d+)", first_a.get("href", ""))
+                        if m:
+                            toban = m.group(1)
+
+                tds = tbody.find_all("td")
+
+                def td_text(i):
+                    return tds[i].get_text(strip=True) if i < len(tds) else ""
+
+                # 級別 (td[2] の / より前)
+                toban_grade = td_text(2)
+                grade = ""
+                g_match = re.search(r"(A1|A2|B1|B2)", toban_grade)
+                if g_match:
+                    grade = g_match.group(1)
+
+                # F数・L数・平均ST (td[3]: "F0L00.12" のような文字列)
+                fl_st_raw = td_text(3)
+                f_match = re.search(r"F(\d+)", fl_st_raw)
+                l_match = re.search(r"L(\d+)", fl_st_raw)
+                st_match = re.search(r"(\d+\.\d+)$", fl_st_raw)
+                f_count = _safe_int(f_match.group(1)) if f_match else 0
+                l_count = _safe_int(l_match.group(1)) if l_match else 0
+                avg_st = _safe_float(st_match.group(1)) if st_match else None
+
+                # 全国・当地・モーター・ボートのデータを <br/> で区切られた文字列から切り出す
+                def parse_td_values(td_elem):
+                    """tdの中のテキストをbrタグで分割して数値リストにする"""
+                    parts = [s.strip() for s in td_elem.stripped_strings]
+                    nums = []
+                    for p in parts:
+                        m = re.match(r'^[\d.]+$', p)
+                        if m:
+                            nums.append(p)
+                    while len(nums) < 3:
+                        nums.append(None)
+                    return nums[:3]
+
+                n_win, n_2ren, n_3ren = parse_td_values(tds[4]) if len(tds) > 4 else [None, None, None]
+                l_win, l_2ren, l_3ren = parse_td_values(tds[5]) if len(tds) > 5 else [None, None, None]
+                motor_vals = parse_td_values(tds[6]) if len(tds) > 6 else [None, None, None]
+                boat_vals = parse_td_values(tds[7]) if len(tds) > 7 else [None, None, None]
+
+                motor_no = _safe_int(motor_vals[0])
+                motor_2ren = _safe_float(motor_vals[1])
+                motor_3ren = _safe_float(motor_vals[2])
+
+                boat_no = _safe_int(boat_vals[0])
+                boat_2ren = _safe_float(boat_vals[1])
+                boat_3ren = _safe_float(boat_vals[2])
+
+                entries.append({
+                    "waku": waku_idx,
+                    "name": name,
+                    "toban": toban,
+                    "grade": grade,
+                    "f_count": f_count,
+                    "l_count": l_count,
+                    "avg_st": avg_st,
+                    "national_win_rate": _safe_float(n_win),
+                    "national_2ren": _safe_float(n_2ren),
+                    "national_3ren": _safe_float(n_3ren),
+                    "local_win_rate": _safe_float(l_win),
+                    "local_2ren": _safe_float(l_2ren),
+                    "local_3ren": _safe_float(l_3ren),
+                    "motor_no": motor_no,
+                    "motor_2ren": motor_2ren,
+                    "motor_3ren": motor_3ren,
+                    "boat_no": boat_no,
+                    "boat_2ren": boat_2ren,
+                    "boat_3ren": boat_3ren,
+                })
 
             return {
                 "jcd": jcd,
@@ -218,12 +299,8 @@ class KyoteiScraper:
         except Exception as e:
             error_msg = f"Error fetching race program for jcd={jcd} rno={race_no}: {e}\n"
             print(error_msg)
-            try:
-                with open("debug_log.txt", "a", encoding="utf-8") as f:
-                    f.write(error_msg)
-            except:
-                pass
             return {}
+
 
     def get_race_result(self, jcd: str, race_no: int, date_str: str = None) -> Dict:
         """
