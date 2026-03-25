@@ -310,10 +310,11 @@ class KyoteiScraper:
         """
         レース結果を取得。全 div.table1 から着順テーブルを自動検索する。
         """
+        import time
         if not date_str:
             date_str = self._get_jst_now().strftime("%Y%m%d")
 
-        url = f"{self.base_url}/raceresult?rno={race_no}&jcd={jcd}&hd={date_str}"
+        url = f"{self.base_url}/raceresult?rno={race_no}&jcd={jcd}&hd={date_str}&_ts={int(time.time())}"
         try:
             resp = self.session.get(url, timeout=15)
             resp.encoding = "utf-8"

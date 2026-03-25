@@ -4,32 +4,49 @@ BoatAuto Web UI (Streamlit)
 import os
 import sys
 import json
+import glob
 from datetime import datetime
 import pytz
 import streamlit as st
 from dotenv import load_dotenv
 
-PENDING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_bets.json")
+PENDING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_bets")
+if not os.path.exists(PENDING_DIR):
+    os.makedirs(PENDING_DIR)
 
 def load_pending() -> list:
-    if os.path.exists(PENDING_FILE):
+    bets = []
+    for filepath in glob.glob(os.path.join(PENDING_DIR, "*.json")):
         try:
-            with open(PENDING_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(filepath, "r", encoding="utf-8") as f:
+                bet = json.load(f)
+                bets.append(bet)
         except Exception:
-            return []
-    return []
+            pass
+    # 日付・時間順にソート (新しいものが上)
+    bets.sort(key=lambda x: (x.get("date", ""), x.get("deadline", "")), reverse=True)
+    return bets
 
-def save_pending(bets: list):
-    with open(PENDING_FILE, "w", encoding="utf-8") as f:
-        json.dump(bets, f, ensure_ascii=False, indent=2)
+def save_pending_item(bet: dict):
+    filepath = os.path.join(PENDING_DIR, f"{bet['key']}.json")
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(bet, f, ensure_ascii=False, indent=2)
 
 def add_pending(program: dict, article: str):
-    bets = load_pending()
     key = f"{program['jcd']}_{program['race_no']}_{program.get('date', '')}"
-    # 重複防止
-    bets = [b for b in bets if b.get("key") != key]
-    bets.append({
+    
+    # 既存のファイルがあれば読み込んでステータスを引き継ぐ
+    status = "pending"
+    filepath = os.path.join(PENDING_DIR, f"{key}.json")
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                old_bet = json.load(f)
+                status = old_bet.get("status", "pending")
+        except Exception:
+            pass
+
+    bet = {
         "key": key,
         "venue": program["venue"],
         "race_no": program["race_no"],
@@ -38,13 +55,29 @@ def add_pending(program: dict, article: str):
         "deadline": program.get("deadline", ""),
         "article": article,
         "saved_at": datetime.now(pytz.timezone('Asia/Tokyo')).strftime("%H:%M"),
-    })
-    save_pending(bets)
+        "status": status
+    }
+    save_pending_item(bet)
+
+def mark_pending_checked(key: str, is_hit: bool):
+    filepath = os.path.join(PENDING_DIR, f"{key}.json")
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                bet = json.load(f)
+            bet["status"] = "hit" if is_hit else "miss"
+            save_pending_item(bet)
+        except Exception:
+            pass
 
 def delete_pending(key: str):
-    bets = load_pending()
-    bets = [b for b in bets if b.get("key") != key]
-    save_pending(bets)
+    filepath = os.path.join(PENDING_DIR, f"{key}.json")
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+        except Exception:
+            pass
+
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -104,6 +137,9 @@ except Exception as e:
 # ==========================================
 with st.sidebar:
     st.title("🚤 BoatAuto 設定")
+    
+    if st.button("↻ 画面を更新", use_container_width=True):
+        st.rerun()
     
     # ペルソナ選択
     personas = ai.get_available_personas()
@@ -206,9 +242,9 @@ with st.sidebar:
         char_max = st.number_input("最大文字数", min_value=10, max_value=500, value=200, step=10)
         
     st.caption("買い目点数")
-    honsen_max = st.slider("本線 最大点数", min_value=1, max_value=20, value=6)
-    atsuo_max = st.slider("熱男 最大点数", min_value=0, max_value=6, value=2)
-    osae_max = st.slider("抑え 最大点数", min_value=0, max_value=10, value=4)
+    honsen_max = st.number_input("本線 最大点数", min_value=1, max_value=20, value=6, step=1)
+    atsuo_max = st.number_input("熱男 最大点数", min_value=0, max_value=6, value=2, step=1)
+    osae_max = st.number_input("抑え 最大点数", min_value=0, max_value=10, value=2, step=1)
     
     # 記事生成ボタン
     if st.button("🤖 AI予想記事を生成", use_container_width=True, type="primary"):
@@ -282,7 +318,11 @@ if st.session_state.article:
     
     with col1:
         st.subheader("note用 予想記事")
-        st.text_area("内容を確認・編集できます:", value=st.session_state.article, height=400, key="edit_article")
+        
+        def update_article():
+            st.session_state.article = st.session_state.edit_article
+
+        st.text_area("内容を確認・編集できます:", value=st.session_state.article, height=400, key="edit_article", on_change=update_article)
         
         save_col1, save_col2 = st.columns(2)
         with save_col1:
@@ -326,7 +366,15 @@ if not pending_bets:
 else:
     for bet in pending_bets:
         vkey = bet["key"]
-        label = f"**{bet['venue']}{bet['race_no']}R** (締切: {bet.get('deadline','??')}) ─ {bet.get('saved_at','')}保存"
+        status = bet.get("status", "pending")
+        if status == "hit":
+            status_icon = "🎯 的中確認済"
+        elif status == "miss":
+            status_icon = "❌ ハズレ確認済"
+        else:
+            status_icon = "⏳ 未確認"
+            
+        label = f"**{bet['venue']}{bet['race_no']}R** (締切: {bet.get('deadline','??')}) ─ {bet.get('saved_at','')}保存 [{status_icon}]"
         with st.expander(label, expanded=False):
             st.code(bet["article"][:300] + "…", language="text")
             col_a, col_b = st.columns(2)
@@ -359,8 +407,8 @@ if st.session_state.pending_check_key:
                 "program": pb,
                 "from_pending": True,
             }
-            # 確認済みのため保留から削除
-            delete_pending(st.session_state.pending_check_key)
+            # 確認済みのため状態を更新して、保留からは消さない
+            mark_pending_checked(st.session_state.pending_check_key, hit["is_hit"])
             st.session_state.pending_check_key = None
         else:
             st.warning("まだ結果が出ていないようです。少し待ってから再度お試しください。")
@@ -395,15 +443,17 @@ if st.session_state.hit_result:
     hit = hit_data["hit"]
     
     if hit["is_hit"]:
-        st.success(f"🎉🎉🎉 的中しました！ ({hit.get('hit_section', '不明')} で {hit.get('hit_bet', '')}) 🎉🎉🎉")
+        section_name_map = {"honsen": "本線", "atsuo": "熱男（絞り）", "osae": "抑え"}
+        section_ja = section_name_map.get(hit.get('hit_section', ''), hit.get('hit_section', '不明'))
+        st.success(f"🎉🎉🎉 的中しました！ ({section_ja} で {hit.get('hit_bet', '')}) 🎉🎉🎉")
         
         with st.spinner("ドヤ投稿を生成中..."):
-            p = st.session_state.program
+            p = hit_data["program"]
             race_info = {"venue": p["venue"], "race_no": p["race_no"]}
             doya = checker.generate_doya_post(hit, race_info, persona_name=selected_persona)
             
             # ユーザー指定の厳密フォーマット
-            simple_doya = f"{p['venue']}{p['race_no']}R🎯{hit.get('result_str', '').replace('-','')}🎯{hit.get('payout', 0):,}円㊗️"
+            simple_doya = f"{p['venue']}{p['race_no']}R🎯{hit.get('result_str', '').replace('-','')}🎯{hit.get('payout', 0):,}円🛵💨"
             
             # 本日の的中リストに追加 (重複防止)
             if simple_doya not in st.session_state.daily_hits:
