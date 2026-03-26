@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from openai import OpenAI
 from typing import Dict, Any
 
@@ -76,8 +77,8 @@ class AIGenerator:
 
         user_prompt = f"""
 以下の競艇レース情報（出走表＋選手・モーター成績データ付き）を分析し、考察と買目を含む予想記事を作成してください。
-予想文面（考察文等すべて）の中では、句読点（「、」や「。」）の使用を全面的に禁止します。代わりにスペースや改行、その他の記号・絵文字などを活用して読みやすくしてください。
-冒頭は必ずタイトルの前に「{deadline}〆」という締切時間から始めてください。タイトルに「[勝負]」や「勝負」といった言葉は含めないでください。
+予想文面（考察文等すべて）の中で、絵文字や記号の直後には絶対に句読点（「、」や「。」）を打たないでください。（例：「🚀。」は「🚀」のみにする）
+冒頭は必ず「{deadline}〆」から始めてください。タイトルには「🔥」などの絵文字や、「[勝負]」「勝負」といった言葉を一切含めないでください。
 考察文（レースの展開予想や見解）は必ず買い目の【前】にのみ書き、買い目の後に文章は書かないでください。
 考察文の長さは全体で {char_min}文字 〜 {char_max}文字 程度に収めてください。
 
@@ -132,8 +133,16 @@ class AIGenerator:
                 max_tokens=1500
             )
             article = response.choices[0].message.content
-            # 強制的に句読点を削除・置換
-            article = article.replace("。", " ").replace("、", " ")
+            
+            # 1行目（タイトル）から特定の文字を削除
+            lines = article.split('\n')
+            if lines:
+                lines[0] = lines[0].replace("🔥", "").replace("[勝負]", "").replace("勝負", "")
+            article = '\n'.join(lines)
+            
+            # 絵文字や記号の直後の句読点を削除 (例: 🚀。 -> 🚀)
+            article = re.sub(r'([^\w\sぁ-んァ-ン一-龥a-zA-Z0-9])([。、])', r'\1', article)
+            
             return article
         except Exception as e:
             print(f"Error generating article: {e}")

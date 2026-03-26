@@ -243,8 +243,8 @@ with st.sidebar:
         
     st.caption("買い目点数")
     honsen_max = st.number_input("本線 最大点数", min_value=1, max_value=20, value=6, step=1)
-    atsuo_max = st.number_input("熱男 最大点数", min_value=0, max_value=6, value=2, step=1)
     osae_max = st.number_input("抑え 最大点数", min_value=0, max_value=10, value=2, step=1)
+    st.caption("※熱男スペシャル💎は常に2点で生成されます")
     
     # 記事生成ボタン
     if st.button("🤖 AI予想記事を生成", use_container_width=True, type="primary"):
@@ -259,8 +259,8 @@ with st.sidebar:
                     "fixed_first": fixed_first,
                     "bet_honsen_min": 2,
                     "bet_honsen_max": honsen_max,
-                    "bet_atsuo_min": 0,
-                    "bet_atsuo_max": atsuo_max,
+                    "bet_atsuo_min": 2,
+                    "bet_atsuo_max": 2,
                     "bet_osae_min": 0,
                     "bet_osae_max": osae_max,
                 }
@@ -376,7 +376,13 @@ else:
             
         label = f"**{bet['venue']}{bet['race_no']}R** (締切: {bet.get('deadline','??')}) ─ {bet.get('saved_at','')}保存 [{status_icon}]"
         with st.expander(label, expanded=False):
-            st.code(bet["article"][:300] + "…", language="text")
+            new_article = st.text_area("予想記事の編集", value=bet["article"], height=200, key=f"edit_pending_{vkey}")
+            if st.button("💾 編集内容を保存", key=f"save_edit_{vkey}"):
+                bet["article"] = new_article
+                save_pending_item(bet)
+                st.success("編集内容を保存しました！")
+                st.rerun()
+
             col_a, col_b = st.columns(2)
             with col_a:
                 if st.button("🏁 結果確認する", key=f"check_{vkey}", type="primary"):
